@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { PROPERTIES, COMPANY_INFO, ABOUT_VALUES, MILESTONES, NAV_LINKS } from "@/lib/data";
 
 // Use environment variable for flexibility with SSL/HTTP configuration
@@ -55,83 +54,103 @@ LINKS:
 CONTEXT:
 ${contextData}`;
 
-    // Log the URL being called for debugging
     const ollamaUrl = `${OLLAMA_BASE_URL}/api/chat`;
-    console.log("Calling Ollama API at:", ollamaUrl);
 
-    // Call Ollama API using the chat endpoint
-    let response: Response;
-    try {
-      response = await fetch(ollamaUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gemma3:1b",
-          messages: [
-            {
-              role: "system",
-              content: systemInstruction,
-            },
-            {
-              role: "assistant",
-              content: "Hello! I'm Riley, your assistant here at Richmond Land. Whether you're looking for your next home, a business space like [RD City](/properties/rd-city), or want to learn more about our journey on our [About Page](/about), I'm here to help. What can I do for you today?",
-            },
-            {
-              role: "user",
-              content: message,
-            },
-          ],
-          stream: false,
-          options: {
-            temperature: 0.3,      // Lower = more accurate, less hallucination
-            top_p: 0.8,
-            top_k: 20,
-            num_predict: 100,      // Short responses = faster
+    // Call Ollama API with streaming enabled
+    const response = await fetch(ollamaUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gemma3:4b",
+        messages: [
+          {
+            role: "system",
+            content: systemInstruction,
           },
-        }),
-      });
-    } catch (fetchError) {
-      // This catches network-level errors (DNS, SSL, connection refused, etc.)
-      console.error("Fetch error to Ollama:", fetchError);
-      console.error("Error name:", (fetchError as Error).name);
-      console.error("Error message:", (fetchError as Error).message);
-      return NextResponse.json(
-        { error: `Network error connecting to AI: ${(fetchError as Error).message}` },
-        { status: 500 }
-      );
-    }
+          {
+            role: "assistant",
+            content: "Hello! I'm Riley, your assistant here at Richmond Land. Whether you're looking for your next home, a business space like [RD City](/properties/rd-city), or want to learn more about our journey on our [About Page](/about), I'm here to help. What can I do for you today?",
+          },
+          {
+            role: "user",
+            content: message,
+          },
+        ],
+        stream: true, // Enable streaming
+        options: {
+          temperature: 0.3,
+          top_p: 0.8,
+          top_k: 20,
+          num_predict: 100,
+        },
+      }),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Ollama API error:", errorText);
-      console.error("Response status:", response.status, response.statusText);
-      return NextResponse.json(
-        { error: `Failed to get response from AI: ${response.status} ${response.statusText}` },
-        { status: 500 }
+      return new Response(
+        JSON.stringify({ error: `Failed to get response from AI: ${response.status}` }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const data = await response.json();
-    console.log("Ollama response data:", JSON.stringify(data, null, 2));
-    
-    const text = data.message?.content;
-    
-    if (!text) {
-      console.error("No content in Ollama response. Full data:", data);
-      return NextResponse.json(
-        { error: "No response content from AI", response: null },
-        { status: 500 }
-      );
-    }
+    // Stream the response back to the client
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
 
-    return NextResponse.json({ response: text });
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = response.body?.getReader();
+        if (!reader) {
+          controller.close();
+          return;
+        }
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // Decode the chunk and parse each line (Ollama sends NDJSON)
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split("\n").filter(line => line.trim());
+
+            for (const line of lines) {
+              try {
+                const json = JSON.parse(line);
+                // Extract the content from the message
+                const content = json.message?.content || "";
+                if (content) {
+                  // Send the text chunk to the client
+                  controller.enqueue(encoder.encode(content));
+                }
+              } catch {
+                // Skip invalid JSON lines
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Stream error:", error);
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Transfer-Encoding": "chunked",
+      },
+    });
   } catch (error) {
     console.error("Chat error:", error);
-    return NextResponse.json(
-      { error: "Failed to process message" },
-      { status: 500 }
+    return new Response(
+      JSON.stringify({ error: "Failed to process message" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 }

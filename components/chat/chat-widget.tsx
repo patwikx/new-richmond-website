@@ -47,6 +47,9 @@ export function ChatWidget() {
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
     setIsLoading(true);
 
+    // Add empty bot message that we'll stream into
+    setMessages((prev) => [...prev, { role: "bot", content: "" }]);
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -54,16 +57,45 @@ export function ChatWidget() {
         body: JSON.stringify({ message: userMessage }),
       });
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error("Failed to get response");
+      }
 
-      if (data.response) {
-        setMessages((prev) => [...prev, { role: "bot", content: data.response }]);
-      } else {
-        throw new Error("No response");
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error("No reader available");
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        
+        // Update the last message (bot message) with new content
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          const lastMessage = newMessages[newMessages.length - 1];
+          if (lastMessage.role === "bot") {
+            lastMessage.content += chunk;
+          }
+          return newMessages;
+        });
       }
     } catch (error) {
       console.error(error);
-      setMessages((prev) => [...prev, { role: "bot", content: "I apologize, but I'm having trouble connecting right now. Please try again later." }]);
+      // Update the empty bot message with error
+      setMessages((prev) => {
+        const newMessages = [...prev];
+        const lastMessage = newMessages[newMessages.length - 1];
+        if (lastMessage.role === "bot" && !lastMessage.content) {
+          lastMessage.content = "I apologize, but I'm having trouble connecting right now. Please try again later.";
+        }
+        return newMessages;
+      });
     } finally {
       setIsLoading(false);
     }
