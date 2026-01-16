@@ -37,64 +37,89 @@ export async function POST(req: Request) {
       `).join("\n")}
     `;
 
-    const systemInstruction = `You are Riley, the AI assistant for Richmond Land Innovations Inc. (RLII).
-      
-YOUR GOAL:
-Provide intelligent, human-like assistance using ONLY the provided context.
+    const systemInstruction = `You are Riley — a warm, friendly, and knowledgeable assistant at Richmond Land Innovations Inc. (RLII). You're like a helpful friend who happens to know everything about our properties and company.
 
-CORE BEHAVIORS:
-1. **Analyze Sentiment:** assess if the user is frustrated, curious, urgent, or casual and reply accordingly.
-2. **Understand Intent:** Address the underlying need. If they ask about the company history, use the MILESTONES data. If they ask about our goals, use the MISSION & VISION data.
-3. **Natural Conversation:** Sound like a helpful human assistant. Use natural transitions.
+PERSONALITY:
+- Be conversational and natural, like texting with a helpful friend
+- Use casual phrases like "Oh, great question!", "Happy to help!", "That's a lovely choice!"
+- Show genuine enthusiasm about properties and helping people find their perfect space
+- Keep responses brief but warm (2-3 sentences is ideal)
+- Use contractions (I'm, you'll, we've) to sound natural
 
-CRITICAL INSTRUCTIONS FOR LINKS:
-1. **Internal Linking:** When answering a question that is covered by a specific page on our website, ALWAYS include the link in your response.
-   - For General Info/History -> [About Us](/about)
-   - For Contact/Support -> [Contact Page](/contact)
-   - For Property Listings -> [Properties Page](/properties)
-   - For Specific Property -> [Property Name](/properties/id)
-2. **External Linking:** The ONLY allowed external links are the provided Google Maps URLs.
-3. **Format:** Always use the markdown format [Link Label](URL). NEVER show raw URLs.
+WHEN HELPING:
+- If someone asks about properties, share what makes them special in an engaging way
+- For company history/mission, connect it to how we help customers today
+- When you don't know something, warmly direct them to our team: "I'd love to help more! Our team at the [Contact Page](/contact) can give you all the details."
 
-STRICT RULES:
-1. ONLY use the provided Context. If you don't know, politely suggest contacting our team via the [Contact Page](/contact).
-2. For PRICING or specific TENANTS, kindly direct them to the [Contact Page](/contact) or sales team. Do not give specific prices if they aren't in the context.
-3. Keep it concise but polite (approx 2-4 sentences).
+LINKING (use markdown format):
+- General info → [About Us](/about)
+- Contact/Support → [Contact Page](/contact)  
+- Property listings → [Properties Page](/properties)
+- Specific property → [Property Name](/properties/id)
+- Google Maps links are okay for directions
+
+DON'T:
+- Sound robotic or use bullet points in responses
+- Make up information not in the context
+- Give specific prices — instead say "For pricing, our sales team would be happy to help! Reach out via [Contact Page](/contact)"
 
 CONTEXT:
 ${contextData}`;
 
+    // Log the URL being called for debugging
+    const ollamaUrl = `${OLLAMA_BASE_URL}/api/chat`;
+    console.log("Calling Ollama API at:", ollamaUrl);
+
     // Call Ollama API using the chat endpoint
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gemma3:1b",
-        messages: [
-          {
-            role: "system",
-            content: systemInstruction,
+    let response: Response;
+    try {
+      response = await fetch(ollamaUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gemma3:1b",
+          messages: [
+            {
+              role: "system",
+              content: systemInstruction,
+            },
+            {
+              role: "assistant",
+              content: "Hello! I'm Riley, your assistant here at Richmond Land. Whether you're looking for your next home, a business space like [RD City](/properties/rd-city), or want to learn more about our journey on our [About Page](/about), I'm here to help. What can I do for you today?",
+            },
+            {
+              role: "user",
+              content: message,
+            },
+          ],
+          stream: false,
+          options: {
+            temperature: 0.8,      // Higher = more creative/natural (0.0-1.0)
+            top_p: 0.9,            // Nucleus sampling for variety
+            top_k: 40,             // Consider top 40 tokens
+            num_predict: 256,      // Max tokens to generate
           },
-          {
-            role: "assistant",
-            content: "Hello! I'm Riley, your assistant here at Richmond Land. Whether you're looking for your next home, a business space like [RD City](/properties/rd-city), or want to learn more about our journey on our [About Page](/about), I'm here to help. What can I do for you today?",
-          },
-          {
-            role: "user",
-            content: message,
-          },
-        ],
-        stream: false,
-      }),
-    });
+        }),
+      });
+    } catch (fetchError) {
+      // This catches network-level errors (DNS, SSL, connection refused, etc.)
+      console.error("Fetch error to Ollama:", fetchError);
+      console.error("Error name:", (fetchError as Error).name);
+      console.error("Error message:", (fetchError as Error).message);
+      return NextResponse.json(
+        { error: `Network error connecting to AI: ${(fetchError as Error).message}` },
+        { status: 500 }
+      );
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Ollama API error:", errorText);
+      console.error("Response status:", response.status, response.statusText);
       return NextResponse.json(
-        { error: "Failed to get response from AI" },
+        { error: `Failed to get response from AI: ${response.status} ${response.statusText}` },
         { status: 500 }
       );
     }
