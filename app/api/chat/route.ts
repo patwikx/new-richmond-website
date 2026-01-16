@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { PROPERTIES, COMPANY_INFO, ABOUT_VALUES, MILESTONES, NAV_LINKS } from "@/lib/data";
 
 // Use environment variable for flexibility with SSL/HTTP configuration
-const OLLAMA_BASE_URL = process.env.OLLAMA_URL || "https://llm.rdhardware.com";
+const OLLAMA_BASE_URL = process.env.OLLAMA_URL;
 
 export async function POST(req: Request) {
   try {
